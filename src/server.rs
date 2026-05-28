@@ -27,10 +27,13 @@ fn ok_text(s: impl Into<String>) -> Result<CallToolResult, McpError> {
 // ----- 参数结构体 -----
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct StartProxyParams {
-    /// 监听端口（默认 18080）
+    /// HTTP/HTTPS 代理监听端口（默认 18080）
     pub port: Option<u16>,
     /// 监听地址（默认 127.0.0.1；给手机用填 0.0.0.0）
     pub host: Option<String>,
+    /// 同时启动 SOCKS5 监听端口（与 appproxy/tun2socks 默认 socks5 模式兼容）；
+    /// 省略或 0 = 不启用 SOCKS5。SOCKS5 入站会内部桥接到 HTTP 代理做 MITM。
+    pub socks5_port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -175,7 +178,7 @@ impl Server {
 
     // ----- 生命周期/配置 -----
     #[tool(
-        description = "启动 mitmproxy 抓包代理。手机经 appproxy 转发时把 host 设为 0.0.0.0。默认端口 18080（避开 Windows 保留端口段）。"
+        description = "启动 mitmproxy 抓包代理。手机经 appproxy 转发时把 host 设为 0.0.0.0。默认 HTTP 端口 18080；额外传 socks5_port 可一并启动 SOCKS5 入口(给 appproxy 默认 socks5 模式用)。"
     )]
     async fn start_proxy(
         &self,
@@ -183,7 +186,8 @@ impl Server {
     ) -> Result<CallToolResult, McpError> {
         let port = p.port.unwrap_or(18080);
         let host = p.host.unwrap_or_else(|| "127.0.0.1".into());
-        match self.ctl.start(port, &host) {
+        let socks5_port = p.socks5_port.filter(|&p| p != 0);
+        match self.ctl.start(port, &host, socks5_port) {
             Ok(msg) => ok_text(msg),
             Err(e) => ok_json(&json!({"error": e.to_string()})),
         }
@@ -532,7 +536,7 @@ impl ServerHandler for Server {
         let mut info = ServerInfo::default();
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.instructions = Some(
-            "mitmproxy 抓包 + 签名逆向分析。先 start_proxy 启动代理(默认 9876)，客户端/手机走代理并装 CA；再用 list_flows/analyze_params/compare_flows/track_param/replay_flow 做逆向。".into(),
+            "mitmproxy 抓包 + 签名逆向分析。先 start_proxy 启动代理(默认 HTTP 18080；传 socks5_port 可一并起 SOCKS5 入口给 appproxy/tun2socks 用)，客户端/手机走代理并装 CA；再用 list_flows/analyze_params/compare_flows/track_param/replay_flow 做逆向。".into(),
         );
         info
     }

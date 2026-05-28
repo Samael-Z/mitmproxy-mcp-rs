@@ -18,10 +18,11 @@ use hudsucker::{
     Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
 };
 use regex::Regex;
-use tokio::sync::oneshot;
+use tokio::sync::Notify;
 
 use crate::model::{FlowRow, Rule};
 use crate::replay::SessionVars;
+use crate::socks5;
 use crate::store::Store;
 
 static FLOW_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -252,6 +253,29 @@ fn apply_replace(bytes: &[u8], rule: &Rule) -> Vec<u8> {
     }
 }
 
+/// 提前 bind 一次释放，给 Windows 保留段/被占等场景一个清晰中文错误。
+fn precheck_bind(addr: SocketAddr, label: &str) -> Result<()> {
+    match std::net::TcpListener::bind(addr) {
+        Ok(l) => {
+            drop(l);
+            Ok(())
+        }
+        Err(e) => {
+            let hint = if e.raw_os_error() == Some(10013) {
+                format!(
+                    "\n提示：端口 {} 可能落在 Windows 保留端口段（运行 `netsh interface ipv4 show excludedportrange protocol=tcp` 查看）。换一个不在保留段的端口。",
+                    addr.port()
+                )
+            } else if e.raw_os_error() == Some(10048) {
+                format!("\n提示：端口 {} 已被占用，换一个端口。", addr.port())
+            } else {
+                String::new()
+            };
+            Err(anyhow!("无法绑定 {label} {addr}: {e}{hint}"))
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 代理控制器
 // ---------------------------------------------------------------------------
@@ -259,7 +283,10 @@ struct ProxyState {
     running: bool,
     host: String,
     port: u16,
-    shutdown: Option<oneshot::Sender<()>>,
+    socks5_port: Option<u16>,
+    /// 共享给 hudsucker 的 graceful shutdown future 和 SOCKS5 监听器 —— stop() 时
+    /// 一次 notify_waiters 同时唤醒两边。
+    shutdown: Option<Arc<Notify>>,
 }
 
 pub struct ProxyController {
@@ -286,6 +313,7 @@ impl ProxyController {
                 running: false,
                 host: "127.0.0.1".into(),
                 port: 18080,
+                socks5_port: None,
                 shutdown: None,
             }),
         }
@@ -335,7 +363,7 @@ impl ProxyController {
         ))
     }
 
-    pub fn start(&self, port: u16, host: &str) -> Result<String> {
+    pub fn start(&self, port: u16, host: &str, socks5_port: Option<u16>) -> Result<String> {
         {
             let st = self.state.lock().unwrap();
             if st.running {
@@ -345,23 +373,18 @@ impl ProxyController {
         let addr: SocketAddr = format!("{host}:{port}")
             .parse()
             .map_err(|e| anyhow!("地址解析失败: {e}"))?;
+        precheck_bind(addr, "HTTP")?;
 
-        // 预检端口：提前给出清晰错误（尤其 Windows 保留端口段 WSAEACCES 10013）
-        match std::net::TcpListener::bind(addr) {
-            Ok(l) => drop(l),
-            Err(e) => {
-                let hint = if e.raw_os_error() == Some(10013) {
-                    format!(
-                        "\n提示：端口 {port} 可能落在 Windows 保留端口段（运行 `netsh interface ipv4 show excludedportrange protocol=tcp` 查看）。换一个不在保留段的端口，或用管理员调整保留段。"
-                    )
-                } else if e.raw_os_error() == Some(10048) {
-                    format!("\n提示：端口 {port} 已被占用，换一个端口。")
-                } else {
-                    String::new()
-                };
-                return Err(anyhow!("无法绑定 {addr}: {e}{hint}"));
+        let socks5_addr = match socks5_port {
+            Some(p) => {
+                let a: SocketAddr = format!("{host}:{p}")
+                    .parse()
+                    .map_err(|e| anyhow!("SOCKS5 地址解析失败: {e}"))?;
+                precheck_bind(a, "SOCKS5")?;
+                Some(a)
             }
-        }
+            None => None,
+        };
 
         let ca = self.load_ca()?;
 
@@ -372,14 +395,16 @@ impl ProxyController {
             pending: VecDeque::new(),
         };
 
-        let (tx, rx) = oneshot::channel::<()>();
+        let shutdown = Arc::new(Notify::new());
+
+        let sd_http = shutdown.clone();
         let proxy = Proxy::builder()
             .with_addr(addr)
             .with_ca(ca)
             .with_rustls_connector(aws_lc_rs::default_provider())
             .with_http_handler(handler)
             .with_graceful_shutdown(async move {
-                let _ = rx.await;
+                sd_http.notified().await;
             })
             .build()
             .map_err(|e| anyhow!("构建代理失败: {e}"))?;
@@ -390,17 +415,35 @@ impl ProxyController {
             }
         });
 
+        // SOCKS5 桥接：内部连到 127.0.0.1:port（不管 host 绑哪）。
+        if let Some(sa) = socks5_addr {
+            let http_loopback: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+            let sd_socks = shutdown.clone();
+            tokio::spawn(async move {
+                if let Err(e) = socks5::run(sa, http_loopback, sd_socks).await {
+                    tracing::error!("socks5 listener exited: {e:?}");
+                }
+            });
+        }
+
         {
             let mut st = self.state.lock().unwrap();
             st.running = true;
             st.host = host.to_string();
             st.port = port;
-            st.shutdown = Some(tx);
+            st.socks5_port = socks5_port;
+            st.shutdown = Some(shutdown);
         }
 
         let cert = self.ca_cert_path();
+        let socks_line = match socks5_port {
+            Some(p) => {
+                format!("\n- SOCKS5 入口：{host}:{p}（appproxy/tun2socks 可直接用 socks5 协议）")
+            }
+            None => String::new(),
+        };
         Ok(format!(
-            "代理已启动：{host}:{port}\n- 客户端把 HTTP/HTTPS 代理指向此地址即可抓包。\n- HTTPS 需在客户端/手机安装 CA 证书：{}",
+            "代理已启动：{host}:{port}\n- 客户端把 HTTP/HTTPS 代理指向此地址即可抓包。{socks_line}\n- HTTPS 需在客户端/手机安装 CA 证书：{}",
             cert.display()
         ))
     }
@@ -410,10 +453,11 @@ impl ProxyController {
         if !st.running {
             return "代理当前未运行。".into();
         }
-        if let Some(tx) = st.shutdown.take() {
-            let _ = tx.send(());
+        if let Some(sd) = st.shutdown.take() {
+            sd.notify_waiters();
         }
         st.running = false;
+        st.socks5_port = None;
         "代理已停止。".into()
     }
 
@@ -423,6 +467,7 @@ impl ProxyController {
             "running": st.running,
             "host": st.host,
             "port": st.port,
+            "socks5_port": st.socks5_port,
             "scope": *self.scope.lock().unwrap(),
             "captured": self.store.count(),
             "session_vars": self.session.lock().unwrap().keys().cloned().collect::<Vec<_>>(),

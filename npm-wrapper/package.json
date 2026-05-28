@@ -1,6 +1,6 @@
 {
   "name": "mitmproxy-mcp-rs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "mitmproxy MCP server for app traffic capture and signature reverse engineering. Single-binary Rust implementation installable via npx.",
   "author": "Samael-Z",
   "license": "GPL-3.0-or-later",
