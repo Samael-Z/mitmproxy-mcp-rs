@@ -11,6 +11,7 @@ mod model;
 mod proxy;
 mod replay;
 mod server;
+mod socks5;
 mod store;
 
 use std::sync::Arc;

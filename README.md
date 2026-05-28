@@ -60,6 +60,16 @@ cargo build --release
 
 代理默认**不自动启动**，由 AI 调 `start_proxy` 启动（**默认端口 18080**，避开 Windows 保留段）。
 
+### SOCKS5 入口（v0.2.0+）
+
+如果客户端走 SOCKS5（如 appproxy / tun2socks），调用 `start_proxy` 时传 `socks5_port`：
+
+```
+start_proxy({ host: "0.0.0.0", port: 18080, socks5_port: 11080 })
+```
+
+SOCKS5 入站会被内部桥接到 HTTP CONNECT，hudsucker 仍在另一端做 MITM——抓到的流量、CA、规则、analyze/compare 全部跟 HTTP 路径一模一样。HTTPS 完整解密；纯 HTTP via SOCKS5 透明转发（不解析）。
+
 ## CA 证书
 
 首次 `start_proxy` 会在 `~/.mitmproxy-mcp-rs/` 生成自签 CA（`ca-cert.pem` + `ca-key.pem`），并持久化复用。HTTPS 抓包需客户端/手机信任 `ca-cert.pem`（路径见 `get_proxy_status`）。Android 7+ 需系统证书（配合 `MoveCertificate` / 重打包注入）。

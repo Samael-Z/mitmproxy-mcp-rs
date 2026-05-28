@@ -1,6 +1,6 @@
 [package]
 name = "mitmproxy-mcp-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "命令行版 mitmproxy MCP server（Rust），面向 app 抓包与签名逆向分析"
 license = "GPL-3.0-or-later"
