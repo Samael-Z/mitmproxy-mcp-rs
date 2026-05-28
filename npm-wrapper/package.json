@@ -1,0 +1,35 @@
+{
+  "name": "mitmproxy-mcp-rs",
+  "version": "0.1.0",
+  "description": "mitmproxy MCP server for app traffic capture and signature reverse engineering. Single-binary Rust implementation installable via npx.",
+  "author": "Samael-Z",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/Samael-Z/mitmproxy-mcp-rs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Samael-Z/mitmproxy-mcp-rs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Samael-Z/mitmproxy-mcp-rs/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mitmproxy",
+    "proxy",
+    "http",
+    "reverse-engineering",
+    "claude"
+  ],
+  "bin": {
+    "mitmproxy-mcp-rs": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
