@@ -16,7 +16,28 @@
 | 重放 | reqwest（rustls） |
 | TLS provider | aws-lc-rs（`prebuilt-nasm`，免装 nasm） |
 
-## 构建
+## 安装与使用
+
+### 方式 1：`npx`（推荐，跨平台开箱即用）
+
+`.claude.json` / `claude_desktop_config.json`：
+
+```json
+{
+  "mcpServers": {
+    "mitmproxy-re": {
+      "command": "npx",
+      "args": ["-y", "mitmproxy-mcp-rs@latest"]
+    }
+  }
+}
+```
+
+首次调用时 npm 包会从 [GitHub Releases](https://github.com/Samael-Z/mitmproxy-mcp-rs/releases) 下载对应平台二进制并缓存，无需手动构建。支持 Linux x86_64 / macOS arm64 / Windows x86_64。
+
+可传 CLI 参数：`"args": ["-y", "mitmproxy-mcp-rs@latest", "--scope", "api.example.com"]`。
+
+### 方式 2：从源码构建
 
 ```bash
 cd E:\DEV\mitmproxy-mcp-rs
@@ -24,17 +45,7 @@ cargo build --release
 # 产物：target\release\mitmproxy-mcp-rs.exe
 ```
 
-> Windows 需 MSVC C 工具链（VS Build Tools）与 cmake；`prebuilt-nasm` 已规避 nasm 依赖。
-
-## 启动
-
-```bash
-mitmproxy-mcp-rs.exe [--db mitm_re_traffic.db] [--scope api.example.com,login.example.com]
-```
-
-stdio MCP server。代理默认**不自动启动**，由 AI 调 `start_proxy` 启动（**默认端口 18080**）。
-
-### 接入 Claude Code / MCP 客户端
+> Windows 需 MSVC C 工具链（VS Build Tools）+ cmake；`prebuilt-nasm` 已规避 nasm 依赖。
 
 ```json
 {
@@ -46,6 +57,8 @@ stdio MCP server。代理默认**不自动启动**，由 AI 调 `start_proxy` �
   }
 }
 ```
+
+代理默认**不自动启动**，由 AI 调 `start_proxy` 启动（**默认端口 18080**，避开 Windows 保留段）。
 
 ## CA 证书
 

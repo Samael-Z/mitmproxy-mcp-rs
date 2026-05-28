@@ -67,10 +67,7 @@ fn build_url(parts: &hudsucker::hyper::http::request::Parts) -> String {
         .and_then(|v| v.to_str().ok())
         .or_else(|| uri.authority().map(|a| a.as_str()))
         .unwrap_or("unknown");
-    let pq = uri
-        .path_and_query()
-        .map(|p| p.as_str())
-        .unwrap_or("/");
+    let pq = uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
     format!("https://{host}{pq}")
 }
 

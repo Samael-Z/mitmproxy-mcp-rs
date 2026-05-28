@@ -1,0 +1,207 @@
+name: build
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # id-token is required by `npm publish --provenance` so the npm registry can
+  # verify the tarball was actually built by this workflow.
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast pre-flight checks: fmt + clippy. Runs once on Linux (cheapest runner).
+  # ---------------------------------------------------------------------------
+  lint:
+    name: lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # Cross-platform build matrix. Each job produces a release-ready archive.
+  # On `v*` tags these archives feed both the GitHub Release and the npm
+  # wrapper (whose cli.js downloads them at first invocation).
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.target }}
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+            asset_suffix: linux-x86_64
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            archive: tar.gz
+            asset_suffix: macos-arm64
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+            asset_suffix: windows-x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+
+      - name: cargo build --release
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: cargo test --release
+        run: cargo test --release --locked --target ${{ matrix.target }}
+
+      - name: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="mitmproxy-mcp-rs-${{ matrix.asset_suffix }}"
+          mkdir -p "$stage"
+          if [[ "${{ matrix.runner }}" == windows-* ]]; then
+            cp "target/${{ matrix.target }}/release/mitmproxy-mcp-rs.exe" "$stage/"
+          else
+            cp "target/${{ matrix.target }}/release/mitmproxy-mcp-rs" "$stage/"
+          fi
+          cp README.md LICENSE "$stage/" 2>/dev/null || true
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            7z a "$stage.zip" "$stage" >/dev/null
+            echo "asset=$stage.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "$stage.tar.gz" "$stage"
+            echo "asset=$stage.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mitmproxy-mcp-rs-${{ matrix.asset_suffix }}
+          path: ${{ env.asset }}
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # On a v* tag: gather every artifact and publish a GitHub Release.
+  # `always()` so a partial release (some platforms missing) is still published.
+  # ---------------------------------------------------------------------------
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v') && always()
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: bail out if no platform artifacts exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/*.tar.gz dist/*.zip)
+          if [[ ${#archives[@]} -eq 0 ]]; then
+            echo "No platform archives produced — every matrix job failed. Aborting release." >&2
+            exit 1
+          fi
+          echo "Found ${#archives[@]} platform archive(s):"
+          ls -la dist/
+      - name: checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS 2>/dev/null || true
+          cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+
+  # ---------------------------------------------------------------------------
+  # On a v* tag, after the GitHub Release is live (so the wrapper's cli.js can
+  # fetch the binaries from it), publish the npm wrapper.
+  # Auto-syncs npm-wrapper/package.json `version` to the tag.
+  # Requires repo secret `_NPMTOKEN` (npm automation token).
+  # ---------------------------------------------------------------------------
+  npm-publish:
+    name: npm publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: derive npm version from tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF##*/}"
+          ver="${tag#v}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Publishing npm version: $ver"
+      - name: sync package.json version
+        working-directory: npm-wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const p = require('./package.json');
+            p.version = '${{ steps.version.outputs.version }}';
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+          echo "package.json now declares:"
+          node -e "console.log(require('./package.json').version)"
+      - name: skip if already published
+        id: check
+        working-directory: npm-wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=$(node -e "console.log(require('./package.json').name)")
+          ver=$(node -e "console.log(require('./package.json').version)")
+          if npm view "${name}@${ver}" version 2>/dev/null; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name}@${ver} already on npm — skipping publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: npm publish
+        if: steps.check.outputs.already_published != 'true'
+        working-directory: npm-wrapper
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets._NPMTOKEN }}
+        run: npm publish --access public --provenance

@@ -53,12 +53,13 @@ impl Store {
     pub fn save_flow(&self, f: &FlowRow) -> Result<i64> {
         let conn = self.conn.lock().unwrap();
         // 复用已存在 seq，否则取 max+1
-        let seq: i64 = match conn.query_row("SELECT seq FROM flows WHERE id = ?1", [&f.id], |r| {
-            r.get(0)
-        }) {
-            Ok(s) => s,
-            Err(_) => conn.query_row("SELECT COALESCE(MAX(seq),0)+1 FROM flows", [], |r| r.get(0))?,
-        };
+        let seq: i64 =
+            match conn.query_row("SELECT seq FROM flows WHERE id = ?1", [&f.id], |r| r.get(0)) {
+                Ok(s) => s,
+                Err(_) => {
+                    conn.query_row("SELECT COALESCE(MAX(seq),0)+1 FROM flows", [], |r| r.get(0))?
+                }
+            };
         conn.execute(
             r#"INSERT INTO flows
                (id, seq, url, host, method, status, req_headers, req_body, resp_headers, resp_body, timestamp, size)
@@ -112,15 +113,17 @@ impl Store {
                 return Some(f);
             }
         }
-        if let Ok(f) = conn.query_row("SELECT * FROM flows WHERE id = ?1", [flow_id], |r| {
-            Self::row_to_flow(r)
-        }) {
+        if let Ok(f) = conn.query_row(
+            "SELECT * FROM flows WHERE id = ?1",
+            [flow_id],
+            Self::row_to_flow,
+        ) {
             return Some(f);
         }
         conn.query_row(
             "SELECT * FROM flows WHERE id LIKE ?1 ORDER BY seq LIMIT 1",
             [format!("{flow_id}%")],
-            |r| Self::row_to_flow(r),
+            Self::row_to_flow,
         )
         .ok()
     }
@@ -190,7 +193,9 @@ impl Store {
             args.push(Box::new(s));
         }
         if let Some(q) = query {
-            sql.push_str(" AND (url LIKE ? OR req_body LIKE ? OR resp_body LIKE ? OR req_headers LIKE ?)");
+            sql.push_str(
+                " AND (url LIKE ? OR req_body LIKE ? OR resp_body LIKE ? OR req_headers LIKE ?)",
+            );
             let wc = format!("%{q}%");
             for _ in 0..4 {
                 args.push(Box::new(wc.clone()));
@@ -204,7 +209,7 @@ impl Store {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        let iter = stmt.query_map(params.as_slice(), |r| Self::row_to_flow(r));
+        let iter = stmt.query_map(params.as_slice(), Self::row_to_flow);
         match iter {
             Ok(it) => it.filter_map(|r| r.ok()).collect(),
             Err(_) => Vec::new(),
@@ -223,8 +228,12 @@ impl Store {
         };
         let mapper = |r: &rusqlite::Row| Self::row_to_flow(r);
         let res = match limit {
-            Some(l) => stmt.query_map([l], mapper).map(|it| it.filter_map(|r| r.ok()).collect()),
-            None => stmt.query_map([], mapper).map(|it| it.filter_map(|r| r.ok()).collect()),
+            Some(l) => stmt
+                .query_map([l], mapper)
+                .map(|it| it.filter_map(|r| r.ok()).collect()),
+            None => stmt
+                .query_map([], mapper)
+                .map(|it| it.filter_map(|r| r.ok()).collect()),
         };
         res.unwrap_or_default()
     }
