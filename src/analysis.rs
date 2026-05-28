@@ -12,8 +12,16 @@ use crate::codec::{self, Classification};
 use crate::model::FlowRow;
 
 const SKIP_HEADERS: &[&str] = &[
-    "host", "content-length", "accept", "accept-encoding", "accept-language", "connection",
-    "user-agent", "content-type", "cache-control", "pragma",
+    "host",
+    "content-length",
+    "accept",
+    "accept-encoding",
+    "accept-language",
+    "connection",
+    "user-agent",
+    "content-type",
+    "cache-control",
+    "pragma",
 ];
 
 static RE_NUM_SEG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+$").unwrap());
@@ -83,7 +91,11 @@ pub fn extract_params(f: &FlowRow) -> Params {
         }
     }
 
-    Params { query, body, header }
+    Params {
+        query,
+        body,
+        header,
+    }
 }
 
 pub fn analyze_params(f: &FlowRow) -> Value {
@@ -91,7 +103,11 @@ pub fn analyze_params(f: &FlowRow) -> Value {
     let mut groups = serde_json::Map::new();
     let mut suspects: Vec<Value> = Vec::new();
 
-    for (loc, pairs) in [("query", &p.query), ("body", &p.body), ("header", &p.header)] {
+    for (loc, pairs) in [
+        ("query", &p.query),
+        ("body", &p.body),
+        ("header", &p.header),
+    ] {
         let mut items = Vec::new();
         for (key, val) in pairs {
             let info = codec::classify(val);
@@ -161,7 +177,11 @@ fn diff_group(a: &BTreeMap<String, String>, b: &BTreeMap<String, String>) -> (Va
 
 fn likely_role(key: &str, cls: &Classification) -> &'static str {
     let kl = key.to_lowercase();
-    if cls.tags.iter().any(|t| t == "timestamp_ms" || t == "timestamp_s") {
+    if cls
+        .tags
+        .iter()
+        .any(|t| t == "timestamp_ms" || t == "timestamp_s")
+    {
         return "timestamp";
     }
     if cls.tags.iter().any(|t| t.starts_with("hex:")) || kl.contains("sign") || kl.contains("sig") {
@@ -238,7 +258,11 @@ pub fn track_param(rows: &[FlowRow], param: &str) -> Value {
     let mut values: Vec<String> = Vec::new();
     for f in rows {
         let p = extract_params(f);
-        for (loc, pairs) in [("query", &p.query), ("body", &p.body), ("header", &p.header)] {
+        for (loc, pairs) in [
+            ("query", &p.query),
+            ("body", &p.body),
+            ("header", &p.header),
+        ] {
             for (k, v) in pairs {
                 if k == param || k.rsplit('.').next() == Some(param) {
                     occ.push(json!({"seq": f.seq, "location": loc, "value": v}));
@@ -385,9 +409,16 @@ pub fn detect_auth(rows: &[FlowRow]) -> Value {
                 }
             } else if kl.contains("csrf") || kl.contains("xsrf") {
                 csrf.insert(k.clone());
-            } else if ["api-key", "apikey", "x-token", "access-token", "app-key", "appkey"]
-                .iter()
-                .any(|x| kl.contains(x))
+            } else if [
+                "api-key",
+                "apikey",
+                "x-token",
+                "access-token",
+                "app-key",
+                "appkey",
+            ]
+            .iter()
+            .any(|x| kl.contains(x))
             {
                 api_key_headers.insert(k.clone());
             }

@@ -23,7 +23,10 @@ use server::Server;
 use store::Store;
 
 #[derive(Parser, Debug)]
-#[command(name = "mitmproxy-mcp-rs", about = "mitmproxy 抓包 + 签名逆向分析 MCP server")]
+#[command(
+    name = "mitmproxy-mcp-rs",
+    about = "mitmproxy 抓包 + 签名逆向分析 MCP server"
+)]
 struct Cli {
     /// SQLite 抓包库路径
     #[arg(long, default_value = "mitm_re_traffic.db")]
@@ -40,8 +43,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warn".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
         )
         .init();
 

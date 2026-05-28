@@ -11,8 +11,13 @@ use url::Url;
 use crate::store::Store;
 
 const DROP_REPLAY_HEADERS: &[&str] = &[
-    "host", "content-length", "content-encoding", "connection", "proxy-connection",
-    "transfer-encoding", "accept-encoding",
+    "host",
+    "content-length",
+    "content-encoding",
+    "connection",
+    "proxy-connection",
+    "transfer-encoding",
+    "accept-encoding",
 ];
 
 pub type SessionVars = Arc<Mutex<HashMap<String, String>>>;
@@ -25,6 +30,7 @@ fn apply_vars(text: &str, vars: &HashMap<String, String>) -> String {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn replay(
     store: &Store,
     session: &SessionVars,
@@ -75,7 +81,10 @@ pub async fn replay(
     if let Some(over) = headers {
         for (k, v) in over {
             let v = apply_vars(&v, &vars);
-            if let Some(slot) = hdr_map.iter_mut().find(|(ek, _)| ek.eq_ignore_ascii_case(&k)) {
+            if let Some(slot) = hdr_map
+                .iter_mut()
+                .find(|(ek, _)| ek.eq_ignore_ascii_case(&k))
+            {
                 slot.1 = v;
             } else {
                 hdr_map.push((k, v));

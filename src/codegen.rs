@@ -3,7 +3,10 @@
 use crate::model::FlowRow;
 
 const DROP_HEADERS: &[&str] = &[
-    "content-length", "connection", "proxy-connection", "transfer-encoding",
+    "content-length",
+    "connection",
+    "proxy-connection",
+    "transfer-encoding",
 ];
 
 fn req_headers(f: &FlowRow) -> Vec<(String, String)> {
@@ -19,7 +22,12 @@ fn sh_quote(s: &str) -> String {
 }
 
 pub fn to_curl(f: &FlowRow) -> String {
-    let mut parts = vec!["curl".to_string(), "-X".into(), f.method.clone(), sh_quote(&f.url)];
+    let mut parts = vec![
+        "curl".to_string(),
+        "-X".into(),
+        f.method.clone(),
+        sh_quote(&f.url),
+    ];
     for (k, v) in req_headers(f) {
         parts.push("-H".into());
         parts.push(sh_quote(&format!("{k}: {v}")));

@@ -168,14 +168,15 @@ impl Server {
     }
 
     fn need_flow(&self, flow_id: &str) -> Result<crate::model::FlowRow, Value> {
-        self.ctl
-            .store
-            .get(flow_id)
-            .ok_or_else(|| json!({"error": format!("未找到 flow: {flow_id}（可用 seq 序号/短id/完整id）")}))
+        self.ctl.store.get(flow_id).ok_or_else(
+            || json!({"error": format!("未找到 flow: {flow_id}（可用 seq 序号/短id/完整id）")}),
+        )
     }
 
     // ----- 生命周期/配置 -----
-    #[tool(description = "启动 mitmproxy 抓包代理。手机经 appproxy 转发时把 host 设为 0.0.0.0。默认端口 18080（避开 Windows 保留端口段）。")]
+    #[tool(
+        description = "启动 mitmproxy 抓包代理。手机经 appproxy 转发时把 host 设为 0.0.0.0。默认端口 18080（避开 Windows 保留端口段）。"
+    )]
     async fn start_proxy(
         &self,
         Parameters(p): Parameters<StartProxyParams>,
@@ -221,7 +222,9 @@ impl Server {
         ok_json(&json!(v))
     }
 
-    #[tool(description = "查看一条 flow 的完整请求+响应（JSON 美化），附 curl。flow_id 支持 seq/短id/完整id。")]
+    #[tool(
+        description = "查看一条 flow 的完整请求+响应（JSON 美化），附 curl。flow_id 支持 seq/短id/完整id。"
+    )]
     async fn inspect_flow(
         &self,
         Parameters(p): Parameters<InspectFlowParams>,
@@ -284,7 +287,11 @@ impl Server {
         &self,
         Parameters(p): Parameters<PathParams>,
     ) -> Result<CallToolResult, McpError> {
-        match self.ctl.store.import_json(&p.path, p.append.unwrap_or(false)) {
+        match self
+            .ctl
+            .store
+            .import_json(&p.path, p.append.unwrap_or(false))
+        {
             Ok(n) => ok_json(&json!({"imported": n})),
             Err(e) => ok_json(&json!({"error": e.to_string()})),
         }
@@ -302,7 +309,9 @@ impl Server {
     }
 
     // ----- 逆向分析 -----
-    #[tool(description = "拆解一条 flow 的 query/body/header 参数，识别每个值的特征(md5/sha/hmac/base64/jwt/时间戳/nonce)，排出签名/加密嫌疑字段。")]
+    #[tool(
+        description = "拆解一条 flow 的 query/body/header 参数，识别每个值的特征(md5/sha/hmac/base64/jwt/时间戳/nonce)，排出签名/加密嫌疑字段。"
+    )]
     async fn analyze_params(
         &self,
         Parameters(p): Parameters<FlowIdParams>,
@@ -313,7 +322,9 @@ impl Server {
         }
     }
 
-    #[tool(description = "对比两条 flow 的参数差异，标出两次都变的字段(签名/时间戳/nonce 强信号)——签名逆向最关键工具。")]
+    #[tool(
+        description = "对比两条 flow 的参数差异，标出两次都变的字段(签名/时间戳/nonce 强信号)——签名逆向最关键工具。"
+    )]
     async fn compare_flows(
         &self,
         Parameters(p): Parameters<CompareParams>,
@@ -329,7 +340,9 @@ impl Server {
         ok_json(&analysis::compare_flows(&a, &b))
     }
 
-    #[tool(description = "在抓到的所有请求中追踪同名参数的取值，判定它是 恒定(token)/单调递增(时间戳)/每次都变(签名)。")]
+    #[tool(
+        description = "在抓到的所有请求中追踪同名参数的取值，判定它是 恒定(token)/单调递增(时间戳)/每次都变(签名)。"
+    )]
     async fn track_param(
         &self,
         Parameters(p): Parameters<TrackParamParams>,
@@ -338,7 +351,9 @@ impl Server {
         ok_json(&analysis::track_param(&rows, &p.param_name))
     }
 
-    #[tool(description = "解码一个字符串。chain 指定步骤(如 [\"base64\",\"gzip\"])依次解；省略则自动识别 base64/base64url/hex/url/jwt。")]
+    #[tool(
+        description = "解码一个字符串。chain 指定步骤(如 [\"base64\",\"gzip\"])依次解；省略则自动识别 base64/base64url/hex/url/jwt。"
+    )]
     async fn decode_value(
         &self,
         Parameters(p): Parameters<DecodeParams>,
@@ -355,7 +370,9 @@ impl Server {
         ok_json(&analysis::detect_auth(&rows))
     }
 
-    #[tool(description = "把抓到的请求按归一化路径聚类，输出 API 结构图(路径模板/次数/query 字段/状态码)。")]
+    #[tool(
+        description = "把抓到的请求按归一化路径聚类，输出 API 结构图(路径模板/次数/query 字段/状态码)。"
+    )]
     async fn get_api_patterns(
         &self,
         Parameters(p): Parameters<ApiPatternsParams>,
@@ -365,7 +382,9 @@ impl Server {
     }
 
     // ----- 重放/验证/代码生成 -----
-    #[tool(description = "用 reqwest 重放一条请求，可覆盖 method/headers/body/query。改单参数重放看服务端是否拒绝，可反推该参数是否被签名覆盖。值里可用 ${var} 引用 session 变量。")]
+    #[tool(
+        description = "用 reqwest 重放一条请求，可覆盖 method/headers/body/query。改单参数重放看服务端是否拒绝，可反推该参数是否被签名覆盖。值里可用 ${var} 引用 session 变量。"
+    )]
     async fn replay_flow(
         &self,
         Parameters(p): Parameters<ReplayParams>,
@@ -405,7 +424,9 @@ impl Server {
         ok_json(&json!({"set": p.name}))
     }
 
-    #[tool(description = "用正则从某条 flow 的响应体提取值，存为 session 变量(如提取登录 token 供后续重放)。")]
+    #[tool(
+        description = "用正则从某条 flow 的响应体提取值，存为 session 变量(如提取登录 token 供后续重放)。"
+    )]
     async fn extract_session_variable(
         &self,
         Parameters(p): Parameters<ExtractVarParams>,
@@ -464,7 +485,9 @@ impl Server {
     }
 
     // ----- 拦截/改写 -----
-    #[tool(description = "添加拦截/改写规则。action: block|replace_body|inject_header；phase: request|response；url_match 为 URL 子串(省略=全部)。")]
+    #[tool(
+        description = "添加拦截/改写规则。action: block|replace_body|inject_header；phase: request|response；url_match 为 URL 子串(省略=全部)。"
+    )]
     async fn add_intercept_rule(
         &self,
         Parameters(p): Parameters<AddRuleParams>,

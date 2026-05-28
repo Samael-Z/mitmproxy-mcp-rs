@@ -14,7 +14,8 @@ use std::io::Read;
 
 static RE_HEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-fA-F]+$").unwrap());
 static RE_B64: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9+/]+={0,2}$").unwrap());
-static RE_B64URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+={0,2}$").unwrap());
+static RE_B64URL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+={0,2}$").unwrap());
 static RE_UUID: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         .unwrap()
@@ -68,7 +69,10 @@ pub fn classify(value: &str) -> Classification {
     }
 
     // 纯数字 -> 时间戳/序号
-    let is_digits = !v.is_empty() && v.trim_start_matches('-').chars().all(|c| c.is_ascii_digit());
+    let is_digits = !v.is_empty()
+        && v.trim_start_matches('-')
+            .chars()
+            .all(|c| c.is_ascii_digit());
     if is_digits {
         tags.push("numeric".into());
         if let Ok(iv) = v.parse::<i64>() {
@@ -94,15 +98,17 @@ pub fn classify(value: &str) -> Classification {
         if let Some(fam) = hex_hash_family(n) {
             tags.push(format!("hex:{fam}"));
             notes.push(format!("{n} hex chars -> 可能是 {fam}/HMAC-{fam}"));
-        } else if n >= 16 && n % 2 == 0 {
+        } else if n >= 16 && n.is_multiple_of(2) {
             tags.push("hex".into());
             notes.push(format!("{n} hex chars"));
         }
     }
 
     // base64 / base64url
-    if !has_jwt && n >= 8 && n % 4 == 0 && !is_digits {
-        if RE_B64.is_match(v) && (v.contains('+') || v.contains('/') || v.ends_with('=') || !RE_HEX.is_match(v)) {
+    if !has_jwt && n >= 8 && n.is_multiple_of(4) && !is_digits {
+        if RE_B64.is_match(v)
+            && (v.contains('+') || v.contains('/') || v.ends_with('=') || !RE_HEX.is_match(v))
+        {
             if let Some(raw) = try_b64(v, false) {
                 tags.push("base64".into());
                 notes.push(describe_bytes("base64 decoded", &raw));
@@ -146,9 +152,19 @@ pub fn suspect_score(key: &str, info: &Classification) -> i32 {
     }
     let key_l = key.to_lowercase();
     for (kw, w) in [
-        ("sign", 6), ("sig", 4), ("token", 3), ("hmac", 6), ("mac", 2),
-        ("hash", 4), ("digest", 4), ("secret", 4), ("auth", 2),
-        ("nonce", 2), ("salt", 2), ("encrypt", 4), ("cipher", 4),
+        ("sign", 6),
+        ("sig", 4),
+        ("token", 3),
+        ("hmac", 6),
+        ("mac", 2),
+        ("hash", 4),
+        ("digest", 4),
+        ("secret", 4),
+        ("auth", 2),
+        ("nonce", 2),
+        ("salt", 2),
+        ("encrypt", 4),
+        ("cipher", 4),
     ] {
         if key_l.contains(kw) {
             score += w;
@@ -263,21 +279,33 @@ fn decode_step(value: &StepVal, step: &str) -> (StepVal, bool, String) {
                 let d = describe_bytes("", &raw);
                 (StepVal::Bytes(raw), true, d)
             }
-            None => (StepVal::Text(value.as_string()), false, "decode failed".into()),
+            None => (
+                StepVal::Text(value.as_string()),
+                false,
+                "decode failed".into(),
+            ),
         },
         "base64url" => match try_b64(&value.as_string(), true) {
             Some(raw) => {
                 let d = describe_bytes("", &raw);
                 (StepVal::Bytes(raw), true, d)
             }
-            None => (StepVal::Text(value.as_string()), false, "decode failed".into()),
+            None => (
+                StepVal::Text(value.as_string()),
+                false,
+                "decode failed".into(),
+            ),
         },
         "hex" => match hex::decode(value.as_string().trim()) {
             Ok(raw) => {
                 let d = describe_bytes("", &raw);
                 (StepVal::Bytes(raw), true, d)
             }
-            Err(e) => (StepVal::Text(value.as_string()), false, format!("hex failed: {e}")),
+            Err(e) => (
+                StepVal::Text(value.as_string()),
+                false,
+                format!("hex failed: {e}"),
+            ),
         },
         "url" => (
             StepVal::Text(
@@ -293,17 +321,33 @@ fn decode_step(value: &StepVal, step: &str) -> (StepVal, bool, String) {
                 let d = describe_bytes("", &raw);
                 (StepVal::Bytes(raw), true, d)
             }
-            Err(e) => (StepVal::Text(value.as_string()), false, format!("gzip failed: {e}")),
+            Err(e) => (
+                StepVal::Text(value.as_string()),
+                false,
+                format!("gzip failed: {e}"),
+            ),
         },
         "zlib" => match zlib_inflate(&value.as_bytes()) {
             Ok(raw) => {
                 let d = describe_bytes("", &raw);
                 (StepVal::Bytes(raw), true, d)
             }
-            Err(e) => (StepVal::Text(value.as_string()), false, format!("zlib failed: {e}")),
+            Err(e) => (
+                StepVal::Text(value.as_string()),
+                false,
+                format!("zlib failed: {e}"),
+            ),
         },
-        "jwt" => (StepVal::Json(decode_jwt(&value.as_string())), true, "jwt header+payload".into()),
-        other => (StepVal::Text(value.as_string()), false, format!("unknown step: {other}")),
+        "jwt" => (
+            StepVal::Json(decode_jwt(&value.as_string())),
+            true,
+            "jwt header+payload".into(),
+        ),
+        other => (
+            StepVal::Text(value.as_string()),
+            false,
+            format!("unknown step: {other}"),
+        ),
     }
 }
 
@@ -318,7 +362,10 @@ fn decode_jwt(token: &str) -> Value {
                         out.insert(name.into(), v);
                     }
                     Err(_) => {
-                        out.insert(name.into(), Value::String(String::from_utf8_lossy(&raw).to_string()));
+                        out.insert(
+                            name.into(),
+                            Value::String(String::from_utf8_lossy(&raw).to_string()),
+                        );
                     }
                 }
             }
@@ -379,7 +426,9 @@ fn describe_bytes(prefix: &str, raw: &[u8]) -> String {
             return format!("{head}utf-8 text: \"{snippet}\"");
         }
     }
-    let magic = magic(raw).map(|m| format!(", looks like {m}")).unwrap_or_default();
+    let magic = magic(raw)
+        .map(|m| format!(", looks like {m}"))
+        .unwrap_or_default();
     let hexhead = hex::encode(&raw[..raw.len().min(16)]);
     format!("{head}{} bytes{magic}, hex={hexhead}", raw.len())
 }
@@ -419,7 +468,20 @@ fn fmt_ts(epoch: i64) -> String {
         }
     }
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let mdays = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mdays = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut mon = 0usize;
     while mon < 12 && d >= mdays[mon] {
         d -= mdays[mon];
